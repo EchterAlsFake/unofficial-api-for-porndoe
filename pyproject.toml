@@ -1,0 +1,35 @@
+[build-system]
+requires = ["uv_build>=0.9.30,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "unofficial-api-for-porndoe"
+version = "1.0.0"
+description = "An asynchronous Python API wrapper and scraper for porndoe.com"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "Johannes Habel", email = "EchterAlsFake@proton.me" }]
+keywords = ["api", "scraper", "async", "asyncio", "porndoe", "video-downloader"]
+dependencies = ["eaf-base-api[hls]>=4.2.2", "selectolax"]
+
+[project.urls]
+Homepage = "https://github.com/EchterAlsFake/unofficial-api-for-porndoe"
+Repository = "https://github.com/EchterAlsFake/unofficial-api-for-porndoe"
+Documentation = "https://docs.echteralsfake.me/porndoe/"
+
+[project.scripts]
+porndoe_api = "porndoe_api.api:main"
+
+[tool.uv.build-backend]
+module-name = "porndoe_api"
+module-root = ""
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "pytest-cov"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
