@@ -90,7 +90,8 @@ async def test_profile_metadata_and_videos(live_client):
 async def test_profile_all_pages(live_client):
     star = await live_client.get_pornstar(STAR_URL)
     rows = await collect(star.videos(pages="all"))
-    assert len(rows) >= star.total_videos
+    assert len(rows) == star.total_videos
+    assert len({row.video_id for row in rows}) == star.total_videos
 
 
 async def test_related_profiles(live_video):

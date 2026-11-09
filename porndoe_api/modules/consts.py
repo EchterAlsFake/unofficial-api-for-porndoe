@@ -63,16 +63,24 @@ def format_length(seconds):
 
 
 def count(value):
-    match = re.search(r"[\d,]+", value or "")
-    return int(match[0].replace(",", "")) if match else None
+    match = re.search(r"\d[\d,.\u00a0\u202f]*", value or "")
+    return int(re.sub(r"\D", "", match[0])) if match else None
 
 
 def pagination(tree):
     pages = [int(parse_qs(urlsplit(n.attributes["href"]).query).get("page", [1])[0])
              for n in tree.css('.pager a[href]')]
-    showing = re.search(r"Showing\s+(\d+)-(\d+)\s+of\s+([\d,]+)", tree.text())
+    # The final page is a span, not a link. Counting links alone loses that page
+    # when an all-pages iterator starts on the last page.
+    pages.extend(count(n.text()) for n in tree.css('.pager .pager-active') if count(n.text()) is not None)
+    showing = None
+    for node in tree.css('.-flex .-grow, .-chp-above-left'):
+        # The surrounding words are translated, but the numeric range is stable.
+        showing = re.search(r"(\d[\d,.]*)\s*[-–]\s*(\d[\d,.]*)\D+?(\d[\d,.]*)", node.text())
+        if showing:
+            break
     total = count(showing[3]) if showing else None
-    per_page = int(showing[2]) - int(showing[1]) + 1 if showing else None
+    per_page = max(0, count(showing[2]) - count(showing[1]) + 1) if showing else None
     total_pages = max(pages, default=1)
     if total and per_page and not pages:
         total_pages = math.ceil(total / per_page)
@@ -232,10 +240,21 @@ def extract_profile(content, kind):
         "external_urls": data.get("sameAs", []), **pagination(tree),
     }
     if kind == "Person":
-        info = {text(n, ".-mhi-strong"): text(n, ".-mhi-text") for n in tree.css(".-mhi-item")}
+        # Labels observed on the site's English, German, French, Spanish,
+        # Italian and Brazilian Portuguese pages.
+        labels = {
+            "age": ("Age", "Das Alter", "Âge", "Años", "Età", "Era"),
+            "country": ("Birth Place", "Geburtsort", "Lieu de naissance", "Lugar de nacimiento",
+                        "Luogo di nascita", "Local de nascimento"),
+            "measurements": ("Measurements", "Maße", "Mesures", "Medidas", "Dimensioni"),
+            "ethnicity": ("Ethnicity", "Ethnizität", "Ethnicité", "Etnicidad", "Etnia"),
+        }
+        fields = {label.casefold(): name for name, aliases in labels.items() for label in aliases}
+        info = {fields.get((text(n, ".-mhi-strong") or "").casefold()): text(n, ".-mhi-text")
+                for n in tree.css(".-mhi-item")}
         result.update({"rank": count(text(tree, ".-mhm-info-strong")),
-                       "age": count(info.get("Age")), "country": info.get("Birth Place"),
-                       "measurements": info.get("Measurements"), "ethnicity": info.get("Ethnicity"),
+                       "age": count(info.get("age")), "country": info.get("country"),
+                       "measurements": info.get("measurements"), "ethnicity": info.get("ethnicity"),
                        "birth_date": data.get("birthDate"), "birth_place": data.get("nationality"),
                        "gender": data.get("gender")})
     else:

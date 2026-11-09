@@ -99,6 +99,11 @@ Listings contain summary metadata by default; use `await video.load_sources("htm
 `IteratorConfig(load_specific_sources=("html",))` to the listing method. Configure request pacing and concurrency
 through `RuntimeConfig` when fetching many pages.
 
+Profile links work on the English site and the `de`, `fr`, `es`, `it`, and `br`
+subdomains. Localized totals and profile fields are parsed while video links
+retain the requested regional host. `pornstar.videos(pages="all")` follows the
+complete profile pagination; `start_page` also works on the final page.
+
 ---
 
 # Tests

@@ -45,7 +45,7 @@ async def get_html_content(core: BaseCore, url: str, *, owner=None) -> str:
 
 
 def _url(url: str, section: str | None = None) -> str:
-    parsed = urlsplit(urljoin(BASE_URL, url))
+    parsed = urlsplit(urljoin(BASE_URL, url.strip()))
     if parsed.scheme not in {"http", "https"} or not (
         parsed.hostname == "porndoe.com" or (parsed.hostname or "").endswith(".porndoe.com")
     ):
