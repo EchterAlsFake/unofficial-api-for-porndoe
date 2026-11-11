@@ -2,10 +2,11 @@
 <p align="center"><em>An asynchronous Python API wrapper and scraper for porndoe.com</em></p>
 
 <div align="center">
+    <a href="https://pepy.tech/project/porndoe_api"><img src="https://static.pepy.tech/badge/porndoe_api" alt="Downloads"></a> +
     <a href="https://pepy.tech/project/unofficial-api-for-porndoe"><img src="https://static.pepy.tech/badge/unofficial-api-for-porndoe" alt="Downloads"></a>
     <a href="https://github.com/EchterAlsFake/unofficial-api-for-porndoe/workflows/"><img src="https://github.com/EchterAlsFake/unofficial-api-for-porndoe/workflows/CodeQL/badge.svg" alt="CodeQL Analysis"/></a>
     <a href="https://echteralsfake.me/ci/unofficial-api-for-porndoe/badge.svg"><img src="https://echteralsfake.me/ci/unofficial-api-for-porndoe/badge.svg" alt="Sync API Tests"/></a>
-</div>
+    </div>
 
 # Disclaimer
 > [!IMPORTANT]
@@ -21,16 +22,20 @@
 
 | Category | Details |
 |---|---|
-| **Video Fetching** | Fetch video objects with rich metadata (title, description, views, publish date, duration, ratings, author, performers, categories, tags, and playable sources) |
-| **Video Downloading** | Progressive MP4 downloads with configurable quality (`best`, `half`, `worst`, or specific resolutions), plus HLS when supplied by the player |
-| **Channel & Pornstar Profiles** | Fetch channel and pornstar profiles, biographies, statistics, videos, and related profiles |
-| **Categories & Browsing** | Discover categories and browse category, tag, and public video listings with pagination |
-| **Video Search** | Search videos and sort by relevance, newest, likes, duration, or views |
-| **Related Videos** | Retrieve related videos and the channel and performers associated with a video |
+| **Video Fetching** | Fetch video objects with full metadata (title, description, views, publish date, ratings, author, and associated models) |
+| **Video Downloading** | HLS-based downloading with configurable quality (`best`, `half`, `worst`, or specific resolutions) |
+| **Channel & Pornstar Profiles** | Fetch channel/pornstar/model profiles, retrieve videos, and extract worked-with-models metadata |
+| **Playlist Fetching** | Fetch and iterate through playlists page-by-page with concurrency control |
+| **Video Search** | Search videos with advanced filters for sorting, upload date, duration, and quality |
+| **Account Support** | Connect user account via login cookies to retrieve personalized watch later, favorites, and recommended videos |
 | **Async-First** | Fully asynchronous (`async` / `await`) built on top of `asyncio` |
 | **Built-in Caching** | Automatic response caching with configurable limits to reduce redundant network requests |
 | **CLI Support** | Command-line interface for quick downloads — run `porndoe_api -h` for options |
-| **Type Safety** | Type hints and `dataclass`-based models throughout |
+| **Type Safety** | Comprehensive type hinting and `dataclass`-based models throughout |
+
+`Video.author_name` provides the uploader display name directly from the video
+page, without fetching the uploader's channel or video statistics. Use
+`await video.get_author` when you need the actual profile object.
 
 #### Networking Features
 
@@ -38,7 +43,7 @@ The networking layer is provided by the [`eaf_base_api`](https://github.com/Echt
 
 | Feature | Description |
 |---|---|
-| **HTTP/1.1, HTTP/2, HTTP/3** | Configurable HTTP version (`v1`, `v2`, `v3` — defaults to HTTP/2) |
+| **HTTP/1.1, HTTP/2, HTTP/3** | Configurable HTTP version (`v1`, `v2`, `v3` — defaults to HTTP/3) |
 | **Browser Impersonation** | Built-in browser fingerprint impersonation via `curl_cffi` (defaults to Chrome) |
 | **Custom JA3 Fingerprint** | Override the TLS fingerprint with a custom JA3 string for advanced use cases |
 | **Proxy Support** | All proxy types supported (HTTP, HTTPS, SOCKS4, SOCKS5) |
@@ -52,9 +57,12 @@ The networking layer is provided by the [`eaf_base_api`](https://github.com/Echt
 ---
 
 # Supported Platforms
+This API has been tested and confirmed working on:
 
-This API has been tested on Linux (x86_64), including real site requests and complete MP4 downloads.
-Other platforms require compatible `curl_cffi` and `selectolax` dependencies. Python 3.12 or later is required.
+- Windows 11 (x64) 
+- macOS Sequoia (x86_64)
+- Linux (Arch) (x86_64)
+- Android 16 (aarch64)
 
 ---
 
@@ -75,47 +83,25 @@ pip install unofficial-api-for-porndoe
 
 ```python
 import asyncio
-from porndoe_api import Client, DownloadConfigRAW
+from porndoe_api import Client, DownloadConfigHLS
 
 async def main():
-    # Initialize a Client object and close its networking session when done
-    async with Client() as client:
-        # Fetch a video
-        video_object = await client.get_video("https://porndoe.com/watch/pd4y7n5e2j8r")
+    # Initialize a Client object
+    client = Client()
+    
+    # Fetch a video
+    video_object = await client.get_video("<insert_url_here>")
+    
+    # Information from Video objects
+    print(video_object.title)
 
-        # Information from Video objects
-        print(video_object.title)
-
-        # Download the video
-        config = DownloadConfigRAW(quality="best", path="./")  # More options in the documentation
-        await video_object.download(config)
+    # Download the video
+    config = DownloadConfigHLS(quality="best", path="./") # More options in the documentation
+    await video_object.download(config)
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
-
-Listing methods such as `client.search()` yield `ScrapeResult` objects. Use `result.unwrap()` to access each video.
-Listings contain summary metadata by default; use `await video.load_sources("html")` for full details or pass
-`IteratorConfig(load_specific_sources=("html",))` to the listing method. Configure request pacing and concurrency
-through `RuntimeConfig` when fetching many pages.
-
-Profile links work on the English site and the `de`, `fr`, `es`, `it`, and `br`
-subdomains. Localized totals and profile fields are parsed while video links
-retain the requested regional host. `pornstar.videos(pages="all")` follows the
-complete profile pagination; `start_page` also works on the final page.
-
----
-
-# Tests
-
-```bash
-uv sync --group dev
-uv run pytest
-```
-
-All tests use real requests to Porndoe and its CDN, including a complete MP4 download.
-There are no saved HTML responses or mocked network tests. Network and scraping failures fail the tests.
-Requests are paced through `RuntimeConfig` to respect the site's rate limits.
 
 ---
 
@@ -148,8 +134,8 @@ This API is licensed under the AGPLv3. See the `LICENSE` file for details.
 
 > [!CAUTION]
 > **Using this in a proprietary application?**
-> Under the AGPLv3, if you integrate, modify, or host this API as part of your application (even over a network), you must open-source your entire application's code under the AGPL.
+> Under the AGPLv3, if you integrate, modify, or host this API as part of your application (even over a network), you must open-source your entire application's code under the AGPL. 
 >
 > If you want to use this API without open-sourcing your own code, you must purchase a commercial license.
->
+> 
 > **For commercial licensing, contact:** EchterAlsFakeBS@proton.me
