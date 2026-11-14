@@ -95,6 +95,8 @@ class Video(BaseMedia):
     length: str | None = media_field("html")
     author_name: str | None = media_field("html")
     author_link: str | None = media_field("html")
+    producers: list[dict] | None = media_field("html")
+    publishers: list[dict] | None = media_field("html")
     pornstars: list[dict[str, str]] | None = media_field("html")
     pornstars_urls: list[str] | None = media_field("html")
     categories: list[dict[str, str]] | None = media_field("html")

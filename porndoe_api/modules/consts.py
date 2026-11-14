@@ -170,6 +170,10 @@ def extract_video(content, url):
     if not title:
         raise ValueError(f"Video metadata not found at {url}")
     author = data.get("producer") or data.get("publisher") or {}
+    def organization_refs(value):
+        items = value if isinstance(value, list) else [value]
+        return [{"name": item["name"], "url": item.get("url")} for item in items
+                if isinstance(item, dict) and item.get("name")]
     stars = [{"name": n.get("name"), "url": n.get("url")} for n in data.get("actor", [])]
     seconds = duration_seconds(data.get("duration"))
     categories = [{"name": n.text(strip=True), "url": link(n, url)}
@@ -181,13 +185,15 @@ def extract_video(content, url):
     return {
         "video_id": urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1],
         "title": html.unescape(title), "description": html.unescape(data.get("description") or
-            attr(tree, 'meta[name="description"]', "content") or title),
+            attr(tree, 'meta[name="description"]', "content") or ""),
         "thumbnail_url": data.get("thumbnailUrl"), "publish_date": data.get("uploadDate"),
         "publish_date_relative": stats[-1] if stats else None,
         # JSON-LD contentUrl is the watch page, not a direct media URL.
         "content_url": data.get("contentUrl") or url,
         "duration": seconds, "length": format_length(seconds),
         "author_name": author.get("name"), "author_link": author.get("url"),
+        "producers": organization_refs(data.get("producer")),
+        "publishers": organization_refs(data.get("publisher")),
         "pornstars": stars, "pornstars_urls": [n["url"] for n in stars if n["url"]],
         "categories": categories, "tags": [n.text(strip=True) for n in tag_nodes],
         "tags_urls": [link(n, url) for n in tag_nodes],
