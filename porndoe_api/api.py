@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from base_api import paginated_stream, PageInfo, validate_pagination
+from base_api.modules.pagination import linked_page, http_status_is
+
 import argparse
 import asyncio
 import json
@@ -56,26 +59,30 @@ def _url(url: str, section: str | None = None) -> str:
     return urlunsplit(parsed._replace(path=parsed.path.rstrip("/") or "/", fragment=""))
 
 
-async def _listing(core, url, constructor, extractor, pages, iterator_config, start_page=1):
-    if (isinstance(pages, bool) or (pages != "all" and (not isinstance(pages, int) or pages < 1))
-            or isinstance(start_page, bool) or not isinstance(start_page, int) or start_page < 1):
-        raise ValueError("pages must be a positive integer or 'all'; start_page must be positive")
+def _listing(core, url, constructor, extractor, pages, iterator_config, start_page=1):
     url = update_url_query(_url(url), page=None)
-    if pages == "all":
-        first = await get_html_content(core, update_url_query(url, page=start_page))
-        info = await asyncio.to_thread(pagination, LexborHTMLParser(first))
-        pages = max(0, info["total_pages"] - start_page + 1)
-    page_urls = [update_url_query(url, page=p) for p in range(start_page, start_page + pages)]
-    stream = scrape_stream(
-        core=core, constructor=constructor, target_page_urls=page_urls,
+    page_url = lambda page: update_url_query(url, page=page)
+
+    def info(content, page, rows):
+        tree = LexborHTMLParser(content)
+        if not tree.css_first("main, .pager, .video-list, .video-item, h1"):
+            raise ValueError("Unrecognized Porndoe listing")
+        return linked_page(content, page, rows, page_url=page_url)
+
+    return paginated_stream(
+        core=core,
+        constructor=constructor,
+        page_url=page_url,
         item_extractor=partial(extractor, base_url=url),
-        # Listing summaries already contain usable fields. Loading full pages is
-        # opt-in, using the same IteratorConfig contract as the other providers.
-        iterator_config=iterator_config if iterator_config is not None else IteratorConfig(),
+        page_info=info,
+        pages=pages,
+        start_page=start_page,
+        iterator_config=iterator_config,
+        verify_first=True,
+        terminal_error=lambda error, page: (
+            page > 1 and (http_status_is(error, 404) or http_status_is(error, 410))
+        ),
     )
-    async with aclosing(stream):
-        async for result in stream:
-            yield result
 
 
 @dataclass(slots=True, kw_only=True)
@@ -202,12 +209,26 @@ class BaseChannelPornstar(BaseMedia):
     def _extract_html(cls, content):
         return extract_profile(content, cls.schema_type)
 
-    def videos(self, pages: int | str = 2, sorting_sort: str | Sort | None = None,
-               iterator_config: IteratorConfig | None = None, start_page: int = 1) -> AsyncGenerator[ScrapeResult[Video], None]:
+    def videos(
+        self,
+        pages: int | str = 1,
+        sorting_sort: str | Sort | None = None,
+        iterator_config: IteratorConfig | None = None,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Video], None]:
+        validate_pagination(pages, start_page)
         url = _url(self.url, self.section)
         if sorting_sort is not None:
             url = update_url_query(url, sort=sorting_sort or None)
-        return _listing(self.core, url, Video, extractor_video_list, pages, iterator_config, start_page)
+        return _listing(
+            self.core,
+            url,
+            Video,
+            extractor_video_list,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -223,12 +244,20 @@ class Pornstar(BaseChannelPornstar):
     section: ClassVar[str] = "pornstars-profile"
     schema_type: ClassVar[str] = "Person"
 
-    def get_channels(self, pages: int | str = 2, iterator_config: IteratorConfig | None = None
-                     ) -> AsyncGenerator[ScrapeResult[Channel], None]:
+    def get_channels(self, pages: int | str = 1, iterator_config=None, *, start_page=1):
+        validate_pagination(pages, start_page)
         parsed = urlsplit(_url(self.url, self.section))
         slug = parsed.path.rsplit("/", 1)[-1]
         url = urlunsplit(parsed._replace(path=f"/pornstar/{slug}/channels", query=""))
-        return _listing(self.core, url, Channel, extractor_channels, pages, iterator_config)
+        return _listing(
+            self.core,
+            url,
+            Channel,
+            extractor_channels,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -239,14 +268,29 @@ class Channel(BaseChannelPornstar):
     section: ClassVar[str] = "channel-profile"
     schema_type: ClassVar[str] = "Organization"
 
-    def get_pornstars(self, gender: str = "female", pages: int | str = 2,
-                     iterator_config: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Pornstar], None]:
+    def get_pornstars(
+        self,
+        gender: str = "female",
+        pages: int | str = 1,
+        iterator_config: IteratorConfig | None = None,
+        *,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Pornstar], None]:
+        validate_pagination(pages, start_page)
         if gender not in {"female", "male", "models"}:
             raise ValueError("gender must be female, male or models")
         parsed = urlsplit(_url(self.url, self.section))
         slug = parsed.path.rsplit("/", 1)[-1]
         url = urlunsplit(parsed._replace(path=f"/channel/{slug}/{gender}", query=""))
-        return _listing(self.core, url, Pornstar, extractor_pornstars, pages, iterator_config)
+        return _listing(
+            self.core,
+            url,
+            Pornstar,
+            extractor_pornstars,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -267,10 +311,28 @@ class Category(BaseMedia):
         return {"name": text(tree, "h1.-heading"),
                 "thumbnail_url": attr(tree, 'meta[property="og:image"]', "content"), **pagination(tree)}
 
-    def videos(self, pages: int | str = 2, sorting_sort: str | Sort | None = None,
-               iterator_config: IteratorConfig | None = None, start_page: int = 1) -> AsyncGenerator[ScrapeResult[Video], None]:
-        url = self.url if sorting_sort is None else update_url_query(self.url, sort=sorting_sort or None)
-        return _listing(self.core, url, Video, extractor_video_list, pages, iterator_config, start_page)
+    def videos(
+        self,
+        pages: int | str = 1,
+        sorting_sort: str | Sort | None = None,
+        iterator_config: IteratorConfig | None = None,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Video], None]:
+        validate_pagination(pages, start_page)
+        url = (
+            self.url
+            if sorting_sort is None
+            else update_url_query(self.url, sort=sorting_sort or None)
+        )
+        return _listing(
+            self.core,
+            url,
+            Video,
+            extractor_video_list,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
 
 class Client:
@@ -309,40 +371,97 @@ class Client:
             await channel.load_sources("html")
         return channel
 
-    def search(self, query: str, sorting_sort: str | Sort = Sort.Sort_relevance,
-               pages: int | str = 2, iterator_config: IteratorConfig | None = None,
-               start_page: int = 1) -> AsyncGenerator[ScrapeResult[Video], None]:
-        url = update_url_query(BASE_URL + "/search", keywords=query, sort=sorting_sort or None)
-        return _listing(self.core, url, Video, extractor_video_list, pages, iterator_config, start_page)
+    def search(
+        self,
+        query: str,
+        sorting_sort: str | Sort = Sort.Sort_relevance,
+        pages: int | str = 1,
+        iterator_config: IteratorConfig | None = None,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Video], None]:
+        validate_pagination(pages, start_page)
+        url = update_url_query(
+            BASE_URL + "/search", keywords=query, sort=sorting_sort or None
+        )
+        return _listing(
+            self.core,
+            url,
+            Video,
+            extractor_video_list,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
-    def get_videos(self, url: str = BASE_URL + "/videos", pages: int | str = 2,
-                   sorting_sort: str | Sort | None = None,
-                   iterator_config: IteratorConfig | None = None, start_page: int = 1) -> AsyncGenerator[ScrapeResult[Video], None]:
+    def get_videos(
+        self,
+        url: str = BASE_URL + "/videos",
+        pages: int | str = 1,
+        sorting_sort: str | Sort | None = None,
+        iterator_config: IteratorConfig | None = None,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Video], None]:
         """Browse any public video listing, including category and tag URLs."""
+        validate_pagination(pages, start_page)
         if sorting_sort is not None:
             url = update_url_query(url, sort=sorting_sort or None)
-        return _listing(self.core, url, Video, extractor_video_list, pages, iterator_config, start_page)
+        return _listing(
+            self.core,
+            url,
+            Video,
+            extractor_video_list,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
-    def get_pornstars(self, pages: int | str = 2, sorting_sort: str | SortPornstar = SortPornstar.Sort_famous,
-                     iterator_config: IteratorConfig | None = None, gender: str | None = None,
-                     country: str | None = None, start_page: int = 1) -> AsyncGenerator[ScrapeResult[Pornstar], None]:
+    def get_pornstars(
+        self,
+        pages: int | str = 1,
+        sorting_sort: str | SortPornstar = SortPornstar.Sort_famous,
+        iterator_config: IteratorConfig | None = None,
+        gender: str | None = None,
+        country: str | None = None,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Pornstar], None]:
+        validate_pagination(pages, start_page)
         url = BASE_URL + "/pornstars"
         if country:
             url += f"/country/{country}"
             url = update_url_query(url, gender=gender if gender != "female" else None)
         elif gender and gender != "female":
             url += f"/gender/{gender}"
-        return _listing(self.core, update_url_query(url, sort=sorting_sort or None),
-                        Pornstar, extractor_pornstars, pages, iterator_config, start_page)
+        return _listing(
+            self.core,
+            update_url_query(url, sort=sorting_sort or None),
+            Pornstar,
+            extractor_pornstars,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
-    def get_channels(self, pages: int | str = 2, sorting_sort: str | SortChannel = SortChannel.Sort_ranking,
-                     iterator_config: IteratorConfig | None = None, section: str = "",
-                     start_page: int = 1) -> AsyncGenerator[ScrapeResult[Channel], None]:
+    def get_channels(
+        self,
+        pages: int | str = 1,
+        sorting_sort: str | SortChannel = SortChannel.Sort_ranking,
+        iterator_config: IteratorConfig | None = None,
+        section: str = "",
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Channel], None]:
+        validate_pagination(pages, start_page)
         if section not in {"", "exclusive", "trending"}:
             raise ValueError("section must be empty, exclusive or trending")
         url = BASE_URL + "/channels" + (f"/{section}" if section else "")
-        return _listing(self.core, update_url_query(url, sort=sorting_sort or None),
-                        Channel, extractor_channels, pages, iterator_config, start_page)
+        return _listing(
+            self.core,
+            update_url_query(url, sort=sorting_sort or None),
+            Channel,
+            extractor_channels,
+            pages,
+            iterator_config,
+            start_page,
+        )
 
     async def get_categories(self, sorting_sort: str | SortCategory = SortCategory.Sort_popular) -> list[Category]:
         url = update_url_query(BASE_URL + "/categories", sort=sorting_sort or None)
